@@ -1,0 +1,30 @@
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+MLDSA44	KEYWORD1
+MLDSA44_NVS	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+generateKeypair	KEYWORD2
+generateKeypairFromSeed	KEYWORD2
+sign	KEYWORD2
+verify	KEYWORD2
+saveKeypair	KEYWORD2
+loadKeypair	KEYWORD2
+loadPublicKey	KEYWORD2
+hasKeypair	KEYWORD2
+eraseKeypair	KEYWORD2
+generateAndSave	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+MLDSA44_PUBLICKEYBYTES	LITERAL1
+MLDSA44_SECRETKEYBYTES	LITERAL1
+MLDSA44_BYTES	LITERAL1
+MLDSA_SEEDBYTES	LITERAL1
+PUBLIC_KEY_SIZE	LITERAL1
+SECRET_KEY_SIZE	LITERAL1
+SIGNATURE_SIZE	LITERAL1

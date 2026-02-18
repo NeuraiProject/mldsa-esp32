@@ -1,0 +1,31 @@
+{
+  "name": "mldsa",
+  "version": "0.1.0",
+  "description": "ML-DSA-44 (FIPS 204) post-quantum digital signatures for ESP32. Ported from the mldsa-native reference implementation with hardware RNG support and memory optimizations.",
+  "keywords": "post-quantum, cryptography, digital-signature, mldsa, dilithium, fips204, pqc, lattice",
+  "license": "Apache-2.0",
+  "authors": [
+    {
+      "name": "Asimov",
+      "email": "code@neurai.org",
+      "url": "https://neurai.org"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NeuraiProject/mldsa-esp32"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": ["mldsa_native.h", "MLDSA44.h", "MLDSA44_NVS.h"],
+  "build": {
+    "srcFilter": [
+      "+<*>",
+      "-<native/aarch64/>",
+      "-<native/x86_64/>",
+      "-<fips202/native/aarch64/>",
+      "-<fips202/native/x86_64/>",
+      "-<fips202/native/armv81m/>"
+    ]
+  }
+}
