@@ -1,24 +1,22 @@
 # MLDSA
 
-Post-quantum digital signatures for ESP32 using **ML-DSA-44** (FIPS 204), formerly known as Dilithium.
-
-> **Note:** This version supports ML-DSA-44 only. Support for ML-DSA-65 and ML-DSA-87 is planned for future releases.
+Post-quantum digital signatures for ESP32 using **ML-DSA** (FIPS 204), formerly known as Dilithium. Supports all three NIST security levels: **ML-DSA-44**, **ML-DSA-65**, and **ML-DSA-87**.
 
 Ported from the [mldsa-native](https://github.com/pq-code-package/mldsa-native) reference implementation (PQCP project) with ESP32 hardware RNG support and memory optimizations for embedded use.
 
 ## Features
 
-- **FIPS 204 compliant** -- ML-DSA-44 (Module-Lattice-Based Digital Signature Algorithm)
+- **FIPS 204 compliant** -- All three ML-DSA security levels (44, 65, 87)
 - **Hardware RNG** -- Uses ESP32's true random number generator (`esp_fill_random`)
-- **Memory optimized** -- Reduced RAM mode (~32KB working memory for signing)
+- **Memory optimized** -- Reduced RAM mode for all parameter sets
 - **Constant-time** -- Side-channel resistant operations with value barriers
-- **NVS key storage** -- Persist keypairs in flash across reboots
-- **Arduino-friendly** -- Simple C++ wrapper class (`MLDSA44`)
+- **NVS key storage** -- Persist ML-DSA-44 keypairs in flash across reboots
+- **Arduino-friendly** -- Simple C++ wrapper classes (`MLDSA44`, `MLDSA65`, `MLDSA87`)
 - **NIST test vectors** -- Verification against official ACVP test vectors included
 
-## MLDSA44
+## About ML-DSA
 
-ML-DSA-44 (Module-Lattice-Based Digital Signature Algorithm, parameter set 44) is a post-quantum digital signature scheme standardized by NIST as **FIPS 204** in August 2024. It is derived from the **CRYSTALS-Dilithium** submission to the NIST Post-Quantum Cryptography competition.
+ML-DSA (Module-Lattice-Based Digital Signature Algorithm) is a post-quantum digital signature scheme standardized by NIST as **FIPS 204** in August 2024. It is derived from the **CRYSTALS-Dilithium** submission to the NIST Post-Quantum Cryptography competition. This library supports all three parameter sets: ML-DSA-44, ML-DSA-65, and ML-DSA-87.
 
 ### How it works
 
@@ -35,7 +33,7 @@ The signing process uses a **Fiat-Shamir with aborts** approach:
 
 - **Quantum-resistant**: security relies on lattice problems with no known efficient quantum algorithm.
 - **Fast**: NTT-based polynomial arithmetic is efficient even on microcontrollers like ESP32.
-- **Compact**: the smallest ML-DSA variant — 1,312-byte public key, 2,420-byte signature — versus RSA-3072 (~384-byte key but ~384-byte signature) or ECDSA P-256 (64-byte signature but classically broken by quantum).
+- **Compact**: ML-DSA-44 has a 1,312-byte public key and 2,420-byte signature; higher levels trade size for stronger security margins.
 - **Deterministic keygen**: keypairs can be derived from a 32-byte seed, enabling reproducible key generation and backup.
 - **Standardized**: FIPS 204 compliance ensures interoperability and regulatory acceptance.
 - **Side-channel resistant**: constant-time implementation using value barriers prevents timing and power analysis attacks.
@@ -48,22 +46,23 @@ The signing process uses a **Fiat-Shamir with aborts** approach:
 | ML-DSA-65 | NIST Level 3 (~AES-192) | 1,952 B | 4,032 B | 3,309 B |
 | ML-DSA-87 | NIST Level 5 (~AES-256) | 2,592 B | 4,896 B | 4,627 B |
 
-ML-DSA-44 is the recommended choice for ESP32 due to its lower memory footprint.
+ML-DSA-44 is the recommended choice for ESP32 due to its lower memory footprint. ML-DSA-65 and ML-DSA-87 are available when higher security margins are needed.
 
 ## Key Sizes
 
-| Parameter | Size |
-|-----------|------|
-| Public Key | 1,312 bytes |
-| Secret Key | 2,560 bytes |
-| Signature | 2,420 bytes |
-| Seed | 32 bytes |
+| Parameter | ML-DSA-44 | ML-DSA-65 | ML-DSA-87 |
+|-----------|-----------|-----------|----------|
+| Public Key | 1,312 B | 1,952 B | 2,592 B |
+| Secret Key | 2,560 B | 4,032 B | 4,896 B |
+| Signature | 2,420 B | 3,309 B | 4,627 B |
+| Seed | 32 B | 32 B | 32 B |
 
 ## Requirements
 
 - ESP32 board (ESP32, ESP32-S2, ESP32-S3, ESP32-C3, etc.)
 - Arduino IDE 1.8+ or PlatformIO
-- ~32KB free stack for signing operations (use FreeRTOS task with 64KB stack)
+- ~32KB free stack for ML-DSA-44 signing, ~45KB for ML-DSA-65, ~59KB for ML-DSA-87
+- FreeRTOS task with 64KB stack (ML-DSA-44/65) or 80KB stack (ML-DSA-87)
 - ~320KB free RAM minimum
 
 ## Installation
@@ -88,9 +87,11 @@ lib_deps =
 
 ## Quick Start
 
+All three variants share the same API. Just include the appropriate header and use the corresponding class:
+
 ```cpp
 #include <Arduino.h>
-#include <MLDSA44.h>
+#include <MLDSA44.h>  // or <MLDSA65.h> or <MLDSA87.h>
 
 void cryptoTask(void *pvParameters) {
   uint8_t pk[MLDSA44::PUBLIC_KEY_SIZE];
@@ -123,32 +124,38 @@ void setup() {
 void loop() { delay(1000); }
 ```
 
+For ML-DSA-65 or ML-DSA-87, replace `MLDSA44` with `MLDSA65` or `MLDSA87` respectively, and increase the FreeRTOS task stack size to 80KB for ML-DSA-87.
+
 ## API Reference
 
-### MLDSA44 (core operations)
+### Core operations (MLDSA44 / MLDSA65 / MLDSA87)
+
+All three wrapper classes expose an identical API. Replace `MLDSAxx` with `MLDSA44`, `MLDSA65`, or `MLDSA87` as needed:
 
 ```cpp
-#include <MLDSA44.h>
+#include <MLDSA44.h>  // or <MLDSA65.h> or <MLDSA87.h>
 
 // Generate a random keypair
-int MLDSA44::generateKeypair(uint8_t *pk, uint8_t *sk);
+int MLDSAxx::generateKeypair(uint8_t *pk, uint8_t *sk);
 
 // Generate keypair from a deterministic 32-byte seed
-int MLDSA44::generateKeypairFromSeed(uint8_t *pk, uint8_t *sk,
+int MLDSAxx::generateKeypairFromSeed(uint8_t *pk, uint8_t *sk,
                                       const uint8_t *seed);
 
 // Sign a message (optional context string)
-int MLDSA44::sign(uint8_t *sig, size_t *siglen,
+int MLDSAxx::sign(uint8_t *sig, size_t *siglen,
                    const uint8_t *msg, size_t msglen,
                    const uint8_t *sk,
                    const uint8_t *ctx = nullptr, size_t ctxlen = 0);
 
 // Verify a signature (optional context string)
-int MLDSA44::verify(const uint8_t *sig, size_t siglen,
+int MLDSAxx::verify(const uint8_t *sig, size_t siglen,
                      const uint8_t *msg, size_t msglen,
                      const uint8_t *pk,
                      const uint8_t *ctx = nullptr, size_t ctxlen = 0);
 ```
+
+Each class provides size constants: `PUBLIC_KEY_SIZE`, `SECRET_KEY_SIZE`, `SIGNATURE_SIZE`, `SEED_SIZE`.
 
 All functions return `0` on success, negative on error.
 
@@ -185,26 +192,33 @@ The `ns` parameter is an NVS namespace string (max 15 characters).
 
 With `MLD_CONFIG_REDUCE_RAM` and `MLD_CONFIG_SERIAL_FIPS202_ONLY` enabled (default in this port):
 
-| Operation | Stack allocation |
-|-----------|-----------------|
-| KeyGen | ~33 KB |
-| Sign | ~32 KB |
-| Verify | ~22 KB |
+| Operation | ML-DSA-44 | ML-DSA-65 | ML-DSA-87 |
+|-----------|-----------|-----------|----------|
+| KeyGen | ~33 KB | ~46 KB | ~63 KB |
+| Sign | ~32 KB | ~45 KB | ~59 KB |
+| Verify | ~22 KB | ~30 KB | ~40 KB |
 
-A FreeRTOS task with 64KB stack is recommended to provide sufficient headroom.
+Recommended FreeRTOS task stack: 64KB for ML-DSA-44/65, 80KB for ML-DSA-87.
 
 ## Important Notes
 
-- **FreeRTOS task required**: ML-DSA operations must run in a FreeRTOS task with sufficient stack (64KB recommended). The default Arduino `loop()` stack (8KB) is too small.
+- **FreeRTOS task required**: ML-DSA operations must run in a FreeRTOS task with sufficient stack (64KB for ML-DSA-44/65, 80KB for ML-DSA-87). The default Arduino `loop()` stack (8KB) is too small.
 - **Blocking operations**: Keygen and signing take several seconds on ESP32. Run them in a dedicated task to avoid blocking other operations.
 - **Secret key handling**: Always zeroize secret keys with `memset(sk, 0, sizeof(sk))` after use.
 - **Hardware RNG**: The ESP32 TRNG provides full entropy when WiFi or Bluetooth is active. With both radios off, it falls back to a pseudo-random source seeded from hardware noise, which is still suitable for most applications.
+- **NVS storage**: The `MLDSA44_NVS` helper is currently available for ML-DSA-44 only. For ML-DSA-65/87, store keys manually using the ESP32 Preferences library.
 
-## Security Level
+## Security Levels
 
-ML-DSA-44 provides NIST Security Level 2 (roughly equivalent to AES-128). This is the lightest ML-DSA variant, optimized for constrained environments like ESP32.
+All three ML-DSA parameter sets are supported:
 
-Support for higher security levels (ML-DSA-65 / ML-DSA-87) is planned for future releases. The underlying `mldsa-native` engine already handles all three parameter sets; the Arduino wrapper classes and memory optimizations for those variants are still work in progress.
+| Variant | NIST Level | Classical equivalent | Recommended stack |
+|---------|-----------|---------------------|------------------|
+| ML-DSA-44 | Level 2 | ~AES-128 | 64 KB |
+| ML-DSA-65 | Level 3 | ~AES-192 | 64 KB |
+| ML-DSA-87 | Level 5 | ~AES-256 | 80 KB |
+
+ML-DSA-44 is recommended for most ESP32 applications due to its lower memory footprint. Use ML-DSA-65 or ML-DSA-87 when higher security margins are required and sufficient RAM is available.
 
 ## License
 
