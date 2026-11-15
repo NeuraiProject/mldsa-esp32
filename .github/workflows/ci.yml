@@ -9,7 +9,7 @@ jobs:
     name: Host tests (NIST ACVP vectors, ASan + UBSan)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run the host test suite
         run: test/host/run.sh
       - name: Check that the vectors shipped with the example are up to date
@@ -23,8 +23,8 @@ jobs:
     name: Firmware builds (ESP32 and ESP32-C3)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
       - name: Install PlatformIO
