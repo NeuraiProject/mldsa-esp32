@@ -1,13 +1,18 @@
 /*
  * ML-DSA-44 NVS Persistent Key Storage Example
  *
- * Demonstrates storing ML-DSA-44 keypairs in ESP32's Non-Volatile Storage (NVS)
- * so they survive reboots without expensive regeneration.
+ * Demonstrates keeping an ML-DSA-44 key in ESP32's Non-Volatile Storage (NVS)
+ * so that the device keeps its identity across reboots.
  *
  * First boot:  Generates a new keypair and stores it in NVS flash.
- * Next boots:  Loads the existing keypair from NVS instantly.
+ * Next boots:  Loads the existing keypair from NVS.
  *
  * The example then signs and verifies a message to prove the loaded keys work.
+ *
+ * What is stored is the 32-byte seed of the key; the keypair is derived from
+ * it again on every load. NVS is not encrypted unless you enable NVS
+ * encryption: without it, anyone who can read the flash can read the key.
+ * MLDSA65_NVS and MLDSA87_NVS work the same way.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,6 +22,10 @@
 #include <MLDSA44_NVS.h>
 
 static const char *NVS_NAMESPACE = "mldsa";
+
+/* The crypto task holds the key and signature buffers on its stack (6 KB
+ * for ML-DSA-44); the library itself needs about 3 KB more. */
+static const uint32_t TASK_STACK_BYTES = 16 * 1024;
 
 void printHex(const char *label, const uint8_t *data, size_t len) {
   Serial.printf("%s (%u bytes): ", label, (unsigned)len);
@@ -40,8 +49,10 @@ void cryptoTask(void *pvParameters) {
     Serial.println("Found existing keypair in NVS, loading...");
     unsigned long start = millis();
 
-    if (!MLDSA44_NVS::loadKeypair(NVS_NAMESPACE, pk, sk)) {
-      Serial.println("ERROR: Failed to load keypair from NVS!");
+    mldsa::NvsError error;
+    if (!MLDSA44_NVS::loadKeypair(NVS_NAMESPACE, pk, sk, &error)) {
+      Serial.printf("ERROR: Failed to load keypair from NVS: %s\n",
+                    mldsa::nvsErrorText(error));
       vTaskDelete(NULL);
       return;
     }
@@ -51,9 +62,13 @@ void cryptoTask(void *pvParameters) {
     Serial.println("No keypair in NVS. Generating new one...");
     unsigned long start = millis();
 
-    int ret = MLDSA44_NVS::generateAndSave(NVS_NAMESPACE, pk, sk);
+    mldsa::NvsError error;
+    int ret = MLDSA44_NVS::generateAndSave(NVS_NAMESPACE, pk, sk, &error);
     if (ret != 0) {
-      Serial.printf("ERROR: generateAndSave failed (code %d)\n", ret);
+      // 1: the key was generated but not stored; negative: keygen failed
+      Serial.printf("ERROR: generateAndSave failed (code %d: %s)\n", ret,
+                    ret == 1 ? mldsa::nvsErrorText(error) : "key generation");
+      MLDSA44::secureZero(sk, sizeof(sk));
       vTaskDelete(NULL);
       return;
     }
@@ -89,7 +104,7 @@ void cryptoTask(void *pvParameters) {
    */
 
 cleanup:
-  memset(sk, 0, sizeof(sk));
+  MLDSA44::secureZero(sk, sizeof(sk));
   Serial.println("\n=== Demo complete. Reset to test NVS reload. ===");
   vTaskDelete(NULL);
 }
@@ -97,7 +112,9 @@ cleanup:
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  xTaskCreate(cryptoTask, "crypto", 65536, NULL, 1, NULL);
+  if (xTaskCreate(cryptoTask, "crypto", TASK_STACK_BYTES, NULL, 1, NULL) != pdPASS) {
+    Serial.println("ERROR: could not create the crypto task");
+  }
 }
 
 void loop() {

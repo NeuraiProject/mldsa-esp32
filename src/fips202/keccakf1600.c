@@ -27,13 +27,11 @@
  * implementation @[supercop, crypto_hash/keccakc512/simple/]
  * by Ronny Van Keer, and the public domain @[tweetfips] implementation. */
 
-#include <assert.h>
-
 #include "keccakf1600.h"
 #if !defined(MLD_CONFIG_MULTILEVEL_NO_SHARED)
 
 #define MLD_KECCAK_NROUNDS 24
-#define MLD_KECCAK_ROL(a, offset) ((a << offset) ^ (a >> (64 - offset)))
+#define MLD_KECCAK_ROL(a, offset) (((a) << (offset)) ^ ((a) >> (64 - (offset))))
 
 MLD_INTERNAL_API
 void mld_keccakf1600_extract_bytes(uint64_t *state, unsigned char *data,
@@ -43,14 +41,16 @@ void mld_keccakf1600_extract_bytes(uint64_t *state, unsigned char *data,
 #if defined(MLD_SYS_LITTLE_ENDIAN)
   uint8_t *state_ptr = (uint8_t *)state + offset;
   for (i = 0; i < length; i++)
-  __loop__(invariant(i <= length))
+  __loop__(invariant(i <= length)
+           decreases(length - i))
   {
     data[i] = state_ptr[i];
   }
 #else  /* MLD_SYS_LITTLE_ENDIAN */
   /* Portable version */
   for (i = 0; i < length; i++)
-  __loop__(invariant(i <= length))
+  __loop__(invariant(i <= length)
+           decreases(length - i))
   {
     data[i] = (state[(offset + i) >> 3] >> (8 * ((offset + i) & 0x07))) & 0xFF;
   }
@@ -65,14 +65,16 @@ void mld_keccakf1600_xor_bytes(uint64_t *state, const unsigned char *data,
 #if defined(MLD_SYS_LITTLE_ENDIAN)
   uint8_t *state_ptr = (uint8_t *)state + offset;
   for (i = 0; i < length; i++)
-  __loop__(invariant(i <= length))
+  __loop__(invariant(i <= length)
+           decreases(length - i))
   {
     state_ptr[i] ^= data[i];
   }
 #else  /* MLD_SYS_LITTLE_ENDIAN */
   /* Portable version */
   for (i = 0; i < length; i++)
-  __loop__(invariant(i <= length))
+  __loop__(invariant(i <= length)
+           decreases(length - i))
   {
     state[(offset + i) >> 3] ^= (uint64_t)data[i]
                                 << (8 * ((offset + i) & 0x07));
@@ -80,11 +82,28 @@ void mld_keccakf1600_xor_bytes(uint64_t *state, const unsigned char *data,
 #endif /* !MLD_SYS_LITTLE_ENDIAN */
 }
 
-MLD_INTERNAL_API
-void mld_keccakf1600x4_extract_bytes(uint64_t *state, unsigned char *data0,
-                                     unsigned char *data1, unsigned char *data2,
-                                     unsigned char *data3, unsigned offset,
-                                     unsigned length)
+#if (!defined(MLD_CONFIG_NO_KEYPAIR_API) || !defined(MLD_CONFIG_REDUCE_RAM) || \
+     defined(MLD_UNIT_TEST)) &&                                                \
+    !defined(MLD_CONFIG_SERIAL_FIPS202_ONLY)
+static void mld_keccakf1600x4_extract_bytes_c(uint64_t *state,
+                                              unsigned char *data0,
+                                              unsigned char *data1,
+                                              unsigned char *data2,
+                                              unsigned char *data3,
+                                              unsigned offset, unsigned length)
+__contract__(
+    requires(0 <= offset && offset <= MLD_KECCAK_LANES * sizeof(uint64_t) &&
+         0 <= length && length <= MLD_KECCAK_LANES * sizeof(uint64_t) - offset)
+    requires(memory_no_alias(state, sizeof(uint64_t) * MLD_KECCAK_LANES * MLD_KECCAK_WAY))
+    requires(memory_no_alias(data0, length))
+    requires(memory_no_alias(data1, length))
+    requires(memory_no_alias(data2, length))
+    requires(memory_no_alias(data3, length))
+    assigns(memory_slice(data0, length))
+    assigns(memory_slice(data1, length))
+    assigns(memory_slice(data2, length))
+    assigns(memory_slice(data3, length))
+)
 {
   mld_keccakf1600_extract_bytes(state + MLD_KECCAK_LANES * 0, data0, offset,
                                 length);
@@ -97,11 +116,43 @@ void mld_keccakf1600x4_extract_bytes(uint64_t *state, unsigned char *data0,
 }
 
 MLD_INTERNAL_API
-void mld_keccakf1600x4_xor_bytes(uint64_t *state, const unsigned char *data0,
-                                 const unsigned char *data1,
-                                 const unsigned char *data2,
-                                 const unsigned char *data3, unsigned offset,
-                                 unsigned length)
+void mld_keccakf1600x4_extract_bytes(uint64_t *state, unsigned char *data0,
+                                     unsigned char *data1, unsigned char *data2,
+                                     unsigned char *data3, unsigned offset,
+                                     unsigned length)
+{
+#if defined(MLD_USE_NATIVE_FIPS202_X4_EXTRACT_BYTES)
+  if (mld_keccakf1600_extract_bytes_x4_native(state, data0, data1, data2, data3,
+                                              offset, length) ==
+      MLD_NATIVE_FUNC_SUCCESS)
+  {
+    return;
+  }
+#endif /* MLD_USE_NATIVE_FIPS202_X4_EXTRACT_BYTES */
+  mld_keccakf1600x4_extract_bytes_c(state, data0, data1, data2, data3, offset,
+                                    length);
+}
+
+static void mld_keccakf1600x4_xor_bytes_c(uint64_t *state,
+                                          const unsigned char *data0,
+                                          const unsigned char *data1,
+                                          const unsigned char *data2,
+                                          const unsigned char *data3,
+                                          unsigned offset, unsigned length)
+__contract__(
+    requires(0 <= offset && offset <= MLD_KECCAK_LANES * sizeof(uint64_t) &&
+         0 <= length && length <= MLD_KECCAK_LANES * sizeof(uint64_t) - offset)
+    requires(memory_no_alias(state, sizeof(uint64_t) * MLD_KECCAK_LANES * MLD_KECCAK_WAY))
+    requires(memory_no_alias(data0, length))
+    /* Case 1: all input buffers are distinct; Case 2: All input buffers are the same */
+    requires((data0 == data1 &&
+              data0 == data2 &&
+              data0 == data3) ||
+         (memory_no_alias(data1, length) &&
+              memory_no_alias(data2, length) &&
+              memory_no_alias(data3, length)))
+    assigns(memory_slice(state, sizeof(uint64_t) * MLD_KECCAK_LANES * MLD_KECCAK_WAY))
+)
 {
   mld_keccakf1600_xor_bytes(state + MLD_KECCAK_LANES * 0, data0, offset,
                             length);
@@ -114,19 +165,40 @@ void mld_keccakf1600x4_xor_bytes(uint64_t *state, const unsigned char *data0,
 }
 
 MLD_INTERNAL_API
+void mld_keccakf1600x4_xor_bytes(uint64_t *state, const unsigned char *data0,
+                                 const unsigned char *data1,
+                                 const unsigned char *data2,
+                                 const unsigned char *data3, unsigned offset,
+                                 unsigned length)
+{
+#if defined(MLD_USE_NATIVE_FIPS202_X4_XOR_BYTES)
+  if (mld_keccakf1600_xor_bytes_x4_native(state, data0, data1, data2, data3,
+                                          offset,
+                                          length) == MLD_NATIVE_FUNC_SUCCESS)
+  {
+    return;
+  }
+#endif /* MLD_USE_NATIVE_FIPS202_X4_XOR_BYTES */
+  mld_keccakf1600x4_xor_bytes_c(state, data0, data1, data2, data3, offset,
+                                length);
+}
+
+MLD_INTERNAL_API
 void mld_keccakf1600x4_permute(uint64_t *state)
 {
-#if defined(MLD_USE_FIPS202_X4_NATIVE)
+#if defined(MLD_USE_NATIVE_FIPS202_X4)
   if (mld_keccak_f1600_x4_native(state) == MLD_NATIVE_FUNC_SUCCESS)
   {
     return;
   }
-#endif /* MLD_USE_FIPS202_X4_NATIVE */
+#endif /* MLD_USE_NATIVE_FIPS202_X4 */
   mld_keccakf1600_permute(state + MLD_KECCAK_LANES * 0);
   mld_keccakf1600_permute(state + MLD_KECCAK_LANES * 1);
   mld_keccakf1600_permute(state + MLD_KECCAK_LANES * 2);
   mld_keccakf1600_permute(state + MLD_KECCAK_LANES * 3);
 }
+#endif /* (!MLD_CONFIG_NO_KEYPAIR_API || !MLD_CONFIG_REDUCE_RAM || \
+          MLD_UNIT_TEST) && !MLD_CONFIG_SERIAL_FIPS202_ONLY */
 
 static const uint64_t mld_KeccakF_RoundConstants[MLD_KECCAK_NROUNDS] = {
     (uint64_t)0x0000000000000001ULL, (uint64_t)0x0000000000008082ULL,
@@ -144,6 +216,10 @@ static const uint64_t mld_KeccakF_RoundConstants[MLD_KECCAK_NROUNDS] = {
 
 MLD_STATIC_TESTABLE
 void mld_keccakf1600_permute_c(uint64_t *state)
+__contract__(
+    requires(memory_no_alias(state, sizeof(uint64_t) * MLD_KECCAK_LANES))
+    assigns(memory_slice(state, sizeof(uint64_t) * MLD_KECCAK_LANES))
+)
 {
   unsigned round;
 
@@ -188,7 +264,8 @@ void mld_keccakf1600_permute_c(uint64_t *state)
   Asu = state[24];
 
   for (round = 0; round < MLD_KECCAK_NROUNDS; round += 2)
-  __loop__(invariant(round <= MLD_KECCAK_NROUNDS && round % 2 == 0))
+  __loop__(invariant(round <= MLD_KECCAK_NROUNDS && round % 2 == 0)
+           decreases(MLD_KECCAK_NROUNDS - round))
   {
     /* prepareTheta */
     BCa = Aba ^ Aga ^ Aka ^ Ama ^ Asa;
@@ -412,12 +489,12 @@ void mld_keccakf1600_permute_c(uint64_t *state)
 MLD_INTERNAL_API
 void mld_keccakf1600_permute(uint64_t *state)
 {
-#if defined(MLD_USE_FIPS202_X1_NATIVE)
+#if defined(MLD_USE_NATIVE_FIPS202_X1)
   if (mld_keccak_f1600_x1_native(state) == MLD_NATIVE_FUNC_SUCCESS)
   {
     return;
   }
-#endif /* MLD_USE_FIPS202_X1_NATIVE */
+#endif /* MLD_USE_NATIVE_FIPS202_X1 */
   mld_keccakf1600_permute_c(state);
 }
 

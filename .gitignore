@@ -1,0 +1,11 @@
+# Local plans, experiments, and temporary files
+/tmp/
+
+# PlatformIO build output
+.pio/
+
+# Python bytecode
+__pycache__/
+
+# NIST ACVP vector cache (scripts/gen_acvp_vectors.py)
+.acvp-data/

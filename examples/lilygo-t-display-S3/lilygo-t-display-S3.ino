@@ -2,9 +2,10 @@
  * Example of ML-DSA-44 (FIPS 204) running on an ESP32 Lilygo T-Display-S3.
  * It uses the TFT_eSPI library to show a modern, real-time UI process.
  * 
- * IMPORTANT: ML-DSA-44 requires ~32KB of working memory to sign a message. 
- * Because the default loop() task stack in Arduino is too small (usually 8KB), 
- * we MUST run the cryptography in a dedicated FreeRTOS task with 64KB stack!
+ * The cryptography runs in its own FreeRTOS task so that the display code in
+ * setup() returns at once. The library takes its working memory (about 13 KB
+ * while signing) from the heap; the task stack only has to hold the key and
+ * signature buffers (6 KB) plus about 3 KB for the library.
  */
 
 #include <Arduino.h>
@@ -12,6 +13,8 @@
 #include <MLDSA44.h>
 
 TFT_eSPI tft = TFT_eSPI();
+
+static const uint32_t TASK_STACK_BYTES = 16 * 1024;
 
 // Custom Colors
 #define NEURAI_PURPLE 0x91BA // RGB565 for (147, 49, 212)
@@ -86,6 +89,7 @@ void cryptoTask(void *pvParameters) {
 
   if (res != 0) {
     updateStatus(76, "FAILED", STATUS_ERR, 0);
+    MLDSA44::secureZero(sk, sizeof(sk));
     vTaskDelete(NULL);
     return;
   }
@@ -113,7 +117,7 @@ void cryptoTask(void *pvParameters) {
   }
 
   // Good security practice: clean up secret key from RAM
-  memset(sk, 0, sizeof(sk));
+  MLDSA44::secureZero(sk, sizeof(sk));
   
   vTaskDelete(NULL);
 }
@@ -128,8 +132,9 @@ void setup() {
   
   drawHeader();
 
-  // Create Crypto Task (64KB stack)
-  xTaskCreate(cryptoTask, "crypto", 65536, NULL, 1, NULL);
+  if (xTaskCreate(cryptoTask, "crypto", TASK_STACK_BYTES, NULL, 1, NULL) != pdPASS) {
+    Serial.println("ERROR: could not create the crypto task");
+  }
 }
 
 void loop() {

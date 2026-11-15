@@ -8,7 +8,11 @@
  */
 
 #include <Arduino.h>
-#include <mldsa_native.h>
+#include <MLDSA44.h>
+
+/* The crypto task holds the key and signature buffers on its stack (6 KB
+ * for ML-DSA-44); the library itself needs about 3 KB more. */
+static const uint32_t TASK_STACK_BYTES = 16 * 1024;
 
 TaskHandle_t cryptoTaskHandle = NULL;
 
@@ -38,14 +42,14 @@ void cryptoTask(void *pvParameters) {
   Serial.println();
 
   Serial.printf("Key sizes: PK=%u bytes, SK=%u bytes, SIG=%u bytes\n",
-                (unsigned int)MLDSA44_PUBLICKEYBYTES,
-                (unsigned int)MLDSA44_SECRETKEYBYTES,
-                (unsigned int)MLDSA44_BYTES);
+                (unsigned int)MLDSA44::PUBLIC_KEY_SIZE,
+                (unsigned int)MLDSA44::SECRET_KEY_SIZE,
+                (unsigned int)MLDSA44::SIGNATURE_SIZE);
   printMemInfo("Start");
 
-  uint8_t pk[MLDSA44_PUBLICKEYBYTES];
-  uint8_t sk[MLDSA44_SECRETKEYBYTES];
-  uint8_t signature[MLDSA44_BYTES];
+  uint8_t pk[MLDSA44::PUBLIC_KEY_SIZE];
+  uint8_t sk[MLDSA44::SECRET_KEY_SIZE];
+  uint8_t signature[MLDSA44::SIGNATURE_SIZE];
   size_t siglen;
   int ret;
 
@@ -53,7 +57,7 @@ void cryptoTask(void *pvParameters) {
   Serial.println("\n--- Key Generation ---");
   printMemInfo("Before keygen");
   unsigned long start = millis();
-  ret = PQCP_MLDSA_NATIVE_MLDSA44_keypair(pk, sk);
+  ret = MLDSA44::generateKeypair(pk, sk);
   unsigned long elapsed = millis() - start;
 
   if (ret != 0) {
@@ -62,7 +66,7 @@ void cryptoTask(void *pvParameters) {
     return;
   }
   Serial.printf("Keypair generated in %lu ms\n", elapsed);
-  printHex("Public Key", pk, MLDSA44_PUBLICKEYBYTES);
+  printHex("Public Key", pk, MLDSA44::PUBLIC_KEY_SIZE);
   printMemInfo("After keygen");
 
   // --- 2. Signing ---
@@ -72,15 +76,12 @@ void cryptoTask(void *pvParameters) {
   Serial.printf("\n--- Signing ---\n");
   Serial.printf("Message: \"%s\" (%u bytes)\n", message, (unsigned int)mlen);
   start = millis();
-  ret = PQCP_MLDSA_NATIVE_MLDSA44_signature(
-      signature, &siglen,
-      (const uint8_t *)message, mlen,
-      NULL, 0,  // No context string
-      sk);
+  ret = MLDSA44::sign(signature, &siglen, (const uint8_t *)message, mlen, sk);
   elapsed = millis() - start;
 
   if (ret != 0) {
     Serial.printf("ERROR: Signing failed with code %d\n", ret);
+    MLDSA44::secureZero(sk, sizeof(sk));
     vTaskDelete(NULL);
     return;
   }
@@ -90,11 +91,7 @@ void cryptoTask(void *pvParameters) {
   // --- 3. Verification ---
   Serial.println("\n--- Verification ---");
   start = millis();
-  ret = PQCP_MLDSA_NATIVE_MLDSA44_verify(
-      signature, siglen,
-      (const uint8_t *)message, mlen,
-      NULL, 0,  // No context string
-      pk);
+  ret = MLDSA44::verify(signature, siglen, (const uint8_t *)message, mlen, pk);
   elapsed = millis() - start;
 
   if (ret == 0) {
@@ -106,11 +103,7 @@ void cryptoTask(void *pvParameters) {
   // --- 4. Tamper test ---
   Serial.println("\n--- Tamper Test ---");
   signature[0] ^= 0x01;  // Flip one bit
-  ret = PQCP_MLDSA_NATIVE_MLDSA44_verify(
-      signature, siglen,
-      (const uint8_t *)message, mlen,
-      NULL, 0,
-      pk);
+  ret = MLDSA44::verify(signature, siglen, (const uint8_t *)message, mlen, pk);
 
   if (ret != 0) {
     Serial.println("Tampered signature correctly REJECTED");
@@ -119,7 +112,7 @@ void cryptoTask(void *pvParameters) {
   }
 
   // Zeroize sensitive material
-  memset(sk, 0, sizeof(sk));
+  MLDSA44::secureZero(sk, sizeof(sk));
 
   Serial.println("\n========================================");
   printMemInfo("End");
@@ -136,15 +129,12 @@ void setup() {
   }
   delay(1000);
 
-  // ML-DSA-44 requires significant stack space for intermediate computations.
-  // 64KB is sufficient for keygen + sign + verify.
-  xTaskCreate(
-      cryptoTask,
-      "cryptoTask",
-      65536,
-      NULL,
-      1,
-      &cryptoTaskHandle);
+  // The library takes its working memory from the heap; the printMemInfo()
+  // lines show how much is free before and after each step.
+  if (xTaskCreate(cryptoTask, "cryptoTask", TASK_STACK_BYTES, NULL, 1,
+                  &cryptoTaskHandle) != pdPASS) {
+    Serial.println("ERROR: could not create the crypto task");
+  }
 }
 
 void loop() {

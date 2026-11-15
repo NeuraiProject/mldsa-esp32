@@ -32,20 +32,21 @@
 
 #define MLD_2_POW_D (1 << MLDSA_D)
 
-/*************************************************
- * Name:        mld_power2round
+/**
+ * For finite field element a, compute a0, a1 such that
+ * a mod^+ MLDSA_Q = a1*2^MLDSA_D + a0 with
+ * -2^{MLDSA_D-1} < a0 <= 2^{MLDSA_D-1}. Assumes a to be standard
+ * representative.
  *
- * Description: For finite field element a, compute a0, a1 such that
- *              a mod^+ MLDSA_Q = a1*2^MLDSA_D + a0 with -2^{MLDSA_D-1} < a0 <=
- *              2^{MLDSA_D-1}. Assumes a to be standard representative.
+ * @spec{Implements @[FIPS204, Algorithm 35, Power2Round].}
  *
- * Arguments:   - int32_t a: input element
- *              - int32_t *a0: pointer to output element a0
- *              - int32_t *a1: pointer to output element a1
+ * @reference{In the reference implementation, a1 is passed as a return value
+ * instead.}
  *
- * Reference: In the reference implementation, a1 is passed as a
- * return value instead.
- **************************************************/
+ * @param[out] a0 Pointer to output element a0.
+ * @param[out] a1 Pointer to output element a1.
+ * @param      a  Input element.
+ */
 static MLD_INLINE void mld_power2round(int32_t *a0, int32_t *a1, int32_t a)
 __contract__(
   requires(memory_no_alias(a0, sizeof(int32_t)))
@@ -62,22 +63,23 @@ __contract__(
   *a0 = a - (*a1 << MLDSA_D);
 }
 
-/*************************************************
- * Name:        mld_decompose
+/**
+ * For finite field element a, compute high and low bits a0, a1 such that
+ * a mod^+ MLDSA_Q = a1 * 2 * MLDSA_GAMMA2 + a0 with
+ * -MLDSA_GAMMA2 < a0 <= MLDSA_GAMMA2 except if
+ * a1 = (MLDSA_Q-1)/(MLDSA_GAMMA2*2) where we set a1 = 0 and
+ * -MLDSA_GAMMA2 <= a0 = a mod^+ MLDSA_Q - MLDSA_Q < 0. Assumes a to be
+ * standard representative.
  *
- * Description: For finite field element a, compute high and low bits a0, a1
- * such that a mod^+ MLDSA_Q = a1* 2 * MLDSA_GAMMA2 + a0 with
- * -MLDSA_GAMMA2 < a0 <= MLDSA_GAMMA2 except
- * if a1 = (MLDSA_Q-1)/(MLDSA_GAMMA2*2) where we set a1 = 0 and
- * -MLDSA_GAMMA2 <= a0 = a mod^+ MLDSA_Q - MLDSA_Q < 0.
- * Assumes a to be standard representative.
+ * @spec{Implements @[FIPS204, Algorithm 36, Decompose].}
  *
- * Arguments:   - int32_t a: input element
- *              - int32_t *a0: pointer to output element a0
- *              - int32_t *a1: pointer to output element a1
+ * @reference{In the reference implementation, a1 is passed as a return value
+ * instead.}
  *
- * Reference: a1 is passed as a return value instead
- **************************************************/
+ * @param[out] a0 Pointer to output element a0.
+ * @param[out] a1 Pointer to output element a1.
+ * @param      a  Input element.
+ */
 static MLD_INLINE void mld_decompose(int32_t *a0, int32_t *a1, int32_t a)
 __contract__(
   requires(memory_no_alias(a0, sizeof(int32_t)))
@@ -85,8 +87,9 @@ __contract__(
   requires(a >= 0 && a < MLDSA_Q)
   assigns(memory_slice(a0, sizeof(int32_t)))
   assigns(memory_slice(a1, sizeof(int32_t)))
-  /* a0 = -MLDSA_GAMMA2 can only occur when (q-1) = a - (a mod MLDSA_GAMMA2),
-   * then a1=1; and a0 = a - (a mod MLDSA_GAMMA2) - 1 (@[FIPS204, Algorithm 36 (Decompose)]) */
+  /* a0 = -MLDSA_GAMMA2 occurs exactly when a = MLDSA_Q - MLDSA_GAMMA2: the
+   * border case of Decompose where a1 = (MLDSA_Q-1)/(2*MLDSA_GAMMA2) is
+   * wrapped to 0 and a0 = a - MLDSA_Q (@[FIPS204, Algorithm 36, Decompose]) */
   ensures(*a0 >= -MLDSA_GAMMA2  && *a0 <= MLDSA_GAMMA2)
   ensures(*a1 >= 0 && *a1 < (MLDSA_Q-1)/(2*MLDSA_GAMMA2))
   ensures((*a1 * 2 * MLDSA_GAMMA2 + *a0 - a) % MLDSA_Q == 0)
@@ -143,7 +146,7 @@ __contract__(
    *
    * See proofs/isabelle/compress for a formalization of the above argument.
    */
-  *a1 = (*a1 * 11275 + (1 << 23)) >> 24;
+  *a1 = (*a1 * 11275 + ((int32_t)1 << 23)) >> 24;
   mld_assert(*a1 >= 0 && *a1 <= 44);
 
   *a1 = mld_ct_sel_int32(0, *a1, mld_ct_cmask_neg_i32(43 - *a1));
@@ -159,7 +162,7 @@ __contract__(
    * eps = 1 / 4290772992 ≈ 2^(-31.99) < 2^(-31), therefore f1' * eps <
    * 2^16 * 2^(-31) = 1 / 2^15 < 1 / 2^12 < 1 / B.
    */
-  *a1 = (*a1 * 1025 + (1 << 21)) >> 22;
+  *a1 = (*a1 * 1025 + ((int32_t)1 << 21)) >> 22;
   mld_assert(*a1 >= 0 && *a1 <= 16);
 
   *a1 &= 15;
@@ -172,21 +175,34 @@ __contract__(
                          mld_ct_cmask_neg_i32((MLDSA_Q - 1) / 2 - *a0));
 }
 
-/*************************************************
- * Name:        mld_make_hint
+/**
+ * Decide a single hint bit from the low part a0 and high part a1 of a
+ * coefficient: return 1 unless a0 lies in the range (-GAMMA2, GAMMA2] that
+ * LowBits would produce, with the boundary value -GAMMA2 also admitted when
+ * a1 == 0 (the Decompose border case).
  *
- * Description: Compute hint bit indicating whether the low bits of the
- *              input element overflow into the high bits.
+ * @note This is not a line-for-line implementation of FIPS 204's MakeHint(z, r)
+ * (@[FIPS204, Algorithm 39, MakeHint]), which takes two ring elements and
+ * returns [[HighBits(r) != HighBits(r + z)]]. Instead, it takes the already
+ * decomposed low/high parts (a0, a1) of a coefficient and decides the hint bit
+ * from them directly. As explained in the block comment of
+ * mld_attempt_signature_generation (sign.c), for the specific values that arise
+ * during signing -- a0 = w0 - cs2 + ct0 and a1 = w1 = HighBits(w) -- this is
+ * equivalent to the spec's MakeHint(-ct0, w - cs2 + ct0) coefficient-wise.
+ * Because it consumes (a0, a1) rather than (z, r), it relies on the caller
+ * having computed a compatible decomposition.
  *
- * Arguments:   - int32_t a0: low bits of input element
- *              - int32_t a1: high bits of input element
+ * @param a0 Low bits of input element.
+ * @param a1 High bits of input element.
  *
- * Returns 1 if overflow, 0 otherwise
- **************************************************/
+ * @return 1 if overflow, 0 otherwise.
+ */
 MLD_MUST_CHECK_RETURN_VALUE
 static MLD_INLINE unsigned int mld_make_hint(int32_t a0, int32_t a1)
 __contract__(
   ensures(return_value >= 0 && return_value <= 1)
+  ensures(return_value == (a0 > MLDSA_GAMMA2 || a0 < -MLDSA_GAMMA2 ||
+                           (a0 == -MLDSA_GAMMA2 && a1 != 0)))
 )
 {
   if (a0 > MLDSA_GAMMA2 || a0 < -MLDSA_GAMMA2 ||
@@ -198,16 +214,16 @@ __contract__(
   return 0;
 }
 
-/*************************************************
- * Name:        mld_use_hint
+/**
+ * Correct high bits according to hint.
  *
- * Description: Correct high bits according to hint.
+ * @spec{Implements @[FIPS204, Algorithm 40, UseHint].}
  *
- * Arguments:   - int32_t a: input element
- *              - int32_t hint: hint bit
+ * @param a    Input element.
+ * @param hint Hint bit.
  *
- * Returns corrected high bits.
- **************************************************/
+ * @return Corrected high bits.
+ */
 MLD_MUST_CHECK_RETURN_VALUE
 static MLD_INLINE int32_t mld_use_hint(int32_t a, int32_t hint)
 __contract__(

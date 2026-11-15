@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host:
+    name: Host tests (NIST ACVP vectors, ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the host test suite
+        run: test/host/run.sh
+      - name: Check that the vectors shipped with the example are up to date
+        run: >
+          python3 scripts/gen_acvp_vectors.py --check
+          --out examples/mldsa_test_vectors/acvp_vectors.h
+      - name: Check the vendored mldsa-native code against GitHub
+        run: scripts/check_upstream.sh --online
+
+  firmware:
+    name: Firmware builds (ESP32 and ESP32-C3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build the regression project and the examples
+        run: test/build_firmware.sh
