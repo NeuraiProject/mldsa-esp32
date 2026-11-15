@@ -2,7 +2,7 @@
 
 Changes to the mldsa library for ESP32, newest first.
 
-## Unreleased
+## 0.3.0 - 2026-11-15
 
 ### Changed
 
